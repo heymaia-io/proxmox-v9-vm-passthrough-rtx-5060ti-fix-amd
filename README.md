@@ -13,6 +13,29 @@ Tested on Proxmox VE 9.1.6, kernel 6.17, MSI PRO B850M-A WIFI (BIOS 2.A30, AGESA
 
 ---
 
+## Glossary
+
+This failure sits at the intersection of ACPI, the IOMMU and VFIO, so the terminology piles up fast. Here is everything you need to follow the rest of this README.
+
+| Term | What it means |
+|---|---|
+| **Passthrough** | Handing a physical PCIe device directly to a virtual machine, so the guest drives the real hardware instead of an emulated one. |
+| **IOMMU** | The chip that translates memory addresses for devices doing DMA. It is what makes passthrough safe: a device can only reach memory the IOMMU lets it reach. AMD calls its implementation AMD-Vi. |
+| **VFIO** | The Linux framework that hands a device to userspace (QEMU) for passthrough. `vfio-pci` is the driver that must claim your device instead of the normal one. |
+| **ACPI** | The firmware-to-OS interface. The BIOS publishes a set of tables describing the hardware; the kernel reads them at boot. |
+| **IVRS** | *I/O Virtualization Reporting Structure*. The ACPI table where AMD firmware describes the IOMMU, including any memory it wants reserved. This is the table we patch. |
+| **IVMD** | *I/O Virtualization Memory Definition*. An entry inside IVRS reserving a memory region. Type `0x22` entries apply to a **range of devices**, which is the heart of this bug. |
+| **Device ID / BDF** | A 16-bit number identifying a PCIe device, derived from its `bus:device.function` address. `01:00.0` is device ID `0x0100`. IVMD ranges are expressed in these. |
+| **`direct` reservation** | An `IOMMU_RESV_DIRECT` region: memory the firmware wants identity-mapped (1:1) for a device. Visible per device under `/sys/bus/pci/devices/<addr>/iommu_group/reserved_regions`. |
+| **`require_direct`** | The kernel flag set on any device carrying a `direct` reservation. It is what ultimately makes VFIO refuse the device. |
+| **Blocking domain** | An IOMMU domain that blocks all DMA. VFIO attaches one while taking ownership of a device — and that is the exact moment the `require_direct` check fires and rejects it. |
+| **IOMMU group** | The smallest set of devices the IOMMU can isolate independently. Everything in a group must be passed through together, which is why a GPU's audio function comes along for the ride. |
+| **initramfs / early-initramfs** | The small filesystem the kernel loads before the real root. Its uncompressed prefix (the "early" part) can carry firmware, microcode — and replacement ACPI tables. |
+| **`oem_revision`** | A version number in every ACPI table header. The kernel only accepts a replacement table whose value is **higher** than the firmware's. Get this wrong and your override is discarded silently. |
+| **Lockdown / Secure Boot** | A kernel mode that blocks operations which could inject code into the kernel — including ACPI table overrides. Must be off for this fix to apply. |
+
+---
+
 ## The problem in short
 
 Some AMD boards declare **IVMD** entries in their ACPI **IVRS** table that cover an **entire range of device IDs**, not a specific device. The kernel turns those into `IOMMU_RESV_DIRECT` reservations and sets `require_direct=1` on every device in the range.
