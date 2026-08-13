@@ -1,16 +1,16 @@
 #!/bin/bash
-# install.sh - Instala el override de tabla ACPI IVRS.
+# install.sh - Install the ACPI IVRS table override.
 #
-# Empaqueta la tabla parcheada en un cpio, instala el hook de initramfs-tools y
-# regenera el initramfs del kernel indicado (por defecto el que esta corriendo).
+# Packs the patched table into a cpio archive, installs the initramfs-tools hook
+# and regenerates the initramfs for the given kernel (the running one by default).
 #
-# Antes de regenerar, guarda una copia del initrd actual en ./backup/.
+# Before regenerating, it saves a copy of the current initrd under ./backup/.
 #
-#   sudo ./install.sh IVRS.patched.aml [version-de-kernel]
+#   sudo ./install.sh IVRS.patched.aml [kernel-version]
 #
-# NOTA IMPORTANTE: se regenera SOLO un kernel a proposito. Usar `-k all` aplicaria
-# el override tambien a los kernels antiguos, que son justamente tu ruta de
-# rollback si el sistema no arranca.
+# IMPORTANT: only one kernel is regenerated, on purpose. Using `-k all` would
+# apply the override to your older kernels too, and those are exactly your
+# rollback path if the system fails to boot.
 
 set -euo pipefail
 
@@ -24,60 +24,60 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 BACKUP_DIR="${HERE}/backup"
 
 if [ -z "${TABLE}" ]; then
-    echo "uso: $0 <IVRS.patched.aml> [version-de-kernel]" >&2
+    echo "usage: $0 <IVRS.patched.aml> [kernel-version]" >&2
     exit 1
 fi
 if [ ! -r "${TABLE}" ]; then
-    echo "ERROR: no puedo leer ${TABLE}" >&2
+    echo "ERROR: cannot read ${TABLE}" >&2
     exit 1
 fi
 if [ "$(id -u)" -ne 0 ]; then
-    echo "ERROR: hay que ejecutarlo como root" >&2
+    echo "ERROR: must be run as root" >&2
     exit 1
 fi
 
-# --- Comprobaciones previas -------------------------------------------------
+# --- Pre-flight checks ------------------------------------------------------
 
-echo "== Comprobaciones previas =="
+echo "== Pre-flight checks =="
 
 if ! grep -q '^CONFIG_ACPI_TABLE_UPGRADE=y' "/boot/config-${KVER}" 2>/dev/null; then
-    echo "ERROR: el kernel ${KVER} no tiene CONFIG_ACPI_TABLE_UPGRADE=y." >&2
-    echo "       Este metodo no puede funcionar en el." >&2
+    echo "ERROR: kernel ${KVER} does not have CONFIG_ACPI_TABLE_UPGRADE=y." >&2
+    echo "       This method cannot work on it." >&2
     exit 1
 fi
 echo "  [OK] CONFIG_ACPI_TABLE_UPGRADE=y"
 
 LOCKDOWN=$(cat /sys/kernel/security/lockdown 2>/dev/null || echo "")
 if echo "${LOCKDOWN}" | grep -q '\[integrity\]\|\[confidentiality\]'; then
-    echo "ERROR: el kernel esta en modo lockdown: ${LOCKDOWN}" >&2
-    echo "       acpi_table_upgrade() se salta bajo lockdown." >&2
-    echo "       Desactiva Secure Boot en el BIOS y vuelve a intentarlo." >&2
+    echo "ERROR: the kernel is in lockdown mode: ${LOCKDOWN}" >&2
+    echo "       acpi_table_upgrade() is skipped under lockdown." >&2
+    echo "       Disable Secure Boot in the BIOS and try again." >&2
     exit 1
 fi
-echo "  [OK] lockdown: ${LOCKDOWN:-no expuesto}"
+echo "  [OK] lockdown: ${LOCKDOWN:-not exposed}"
 
 if ! grep -q 'prepend_earlyinitramfs' /usr/share/initramfs-tools/hook-functions 2>/dev/null; then
-    echo "ERROR: tu initramfs-tools no soporta prepend_earlyinitramfs." >&2
+    echo "ERROR: your initramfs-tools does not support prepend_earlyinitramfs." >&2
     exit 1
 fi
-echo "  [OK] initramfs-tools soporta prepend_earlyinitramfs"
+echo "  [OK] initramfs-tools supports prepend_earlyinitramfs"
 
 if [ "$(head -c4 "${TABLE}")" != "IVRS" ]; then
-    echo "ERROR: ${TABLE} no parece una tabla IVRS" >&2
+    echo "ERROR: ${TABLE} does not look like an IVRS table" >&2
     exit 1
 fi
-echo "  [OK] ${TABLE} tiene firma IVRS"
+echo "  [OK] ${TABLE} has an IVRS signature"
 
-# --- Construir el cpio ------------------------------------------------------
+# --- Build the cpio ---------------------------------------------------------
 
 echo
-echo "== Construyendo el cpio =="
+echo "== Building the cpio =="
 WORK=$(mktemp -d)
 trap 'rm -rf "${WORK}"' EXIT
 
 mkdir -p "${WORK}/kernel/firmware/acpi"
 cp "${TABLE}" "${WORK}/kernel/firmware/acpi/IVRS.aml"
-# Timestamp fijo para que el cpio sea reproducible
+# Fixed timestamp so the cpio is reproducible
 find "${WORK}" -print0 | xargs -0r touch --no-dereference --date="@1000000000"
 
 mkdir -p "${CPIO_DIR}"
@@ -87,53 +87,53 @@ mkdir -p "${CPIO_DIR}"
 echo "  ${CPIO_PATH}"
 cpio -itv < "${CPIO_PATH}" 2>/dev/null | sed 's/^/    /'
 
-# --- Instalar el hook -------------------------------------------------------
+# --- Install the hook -------------------------------------------------------
 
 echo
-echo "== Instalando el hook =="
+echo "== Installing the hook =="
 install -m 0755 "${HERE}/hooks/acpi_ivrs_override" "${HOOK_PATH}"
 echo "  ${HOOK_PATH}"
 
-# --- Backup del initrd ------------------------------------------------------
+# --- Back up the initrd -----------------------------------------------------
 
 echo
-echo "== Backup del initrd actual =="
+echo "== Backing up the current initrd =="
 mkdir -p "${BACKUP_DIR}"
 if [ -f "/boot/initrd.img-${KVER}" ]; then
     cp -n "/boot/initrd.img-${KVER}" "${BACKUP_DIR}/initrd.img-${KVER}.bak" \
         && echo "  ${BACKUP_DIR}/initrd.img-${KVER}.bak" \
-        || echo "  ya existia un backup, no se sobrescribe"
+        || echo "  a backup already existed, not overwriting"
 else
-    echo "  AVISO: /boot/initrd.img-${KVER} no existe"
+    echo "  WARNING: /boot/initrd.img-${KVER} does not exist"
 fi
 
-# --- Regenerar --------------------------------------------------------------
+# --- Regenerate -------------------------------------------------------------
 
 echo
-echo "== Regenerando initramfs de ${KVER} =="
+echo "== Regenerating initramfs for ${KVER} =="
 update-initramfs -u -k "${KVER}"
 
-# --- Verificar --------------------------------------------------------------
+# --- Verify -----------------------------------------------------------------
 
 echo
-echo "== Verificando que la tabla viaja dentro del initrd =="
+echo "== Verifying the table travels inside the initrd =="
 python3 "${HERE}/verify_initrd.py" "/boot/initrd.img-${KVER}" "${TABLE}"
 
 cat <<EOF
 
 ===========================================================================
-Instalado. Reinicia y comprueba:
+Installed. Reboot and check:
 
     dmesg | grep -i 'Table Upgrade'
-        -> debe imprimir: override [IVRS-...]
+        -> should print: override [IVRS-...]
 
     stat -c%s /sys/firmware/acpi/tables/IVRS
-        -> debe coincidir con el tamano de tu tabla parcheada
+        -> should match the size of your patched table
 
-    cat /sys/bus/pci/devices/<TU_DISPOSITIVO>/iommu_group/reserved_regions
-        -> las lineas 'direct' deben haber desaparecido
+    cat /sys/bus/pci/devices/<YOUR_DEVICE>/iommu_group/reserved_regions
+        -> the 'direct' lines should be gone
 
-Si el sistema no arranca: elige un kernel anterior en el menu de GRUB
-(Advanced options), cuyo initrd no lleva el override, y ejecuta ./uninstall.sh
+If the system does not boot: pick an older kernel from the GRUB menu
+(Advanced options), whose initrd has no override, and run ./uninstall.sh
 ===========================================================================
 EOF

@@ -1,16 +1,16 @@
 #!/bin/sh
-# Hook de initramfs-tools: antepone una tabla ACPI IVRS parcheada al initramfs.
+# initramfs-tools hook: prepend a patched ACPI IVRS table to the initramfs.
 #
-# Instalar en: /etc/initramfs-tools/hooks/acpi_ivrs_override  (chmod +x)
+# Install to: /etc/initramfs-tools/hooks/acpi_ivrs_override  (chmod +x)
 #
-# Proposito: neutralizar las reservas IVMD del firmware que marcan require_direct=1
-# sobre el dispositivo que quieres pasar a una VM, y que hacen que VFIO falle con
+# Purpose: neutralise the firmware's IVMD reservations that set require_direct=1
+# on the device you want to pass through to a VM, and which make VFIO fail with
 # "Firmware has requested this device have a 1:1 IOMMU mapping".
 #
-# Al vivir como hook, el override se re-aplica solo en cada update-initramfs, o sea
-# que sobrevive a las actualizaciones de kernel.
+# Living as a hook means the override is re-applied on every update-initramfs,
+# so it survives kernel updates.
 #
-# ROLLBACK: borrar este archivo y correr `update-initramfs -u -k $(uname -r)`.
+# ROLLBACK: delete this file and run `update-initramfs -u -k $(uname -r)`.
 
 PREREQ=""
 
@@ -31,7 +31,7 @@ esac
 CPIO=/usr/local/lib/acpi-override/acpi_ivrs_override.cpio
 
 if [ ! -r "${CPIO}" ]; then
-    echo "W: acpi_ivrs_override: ${CPIO} no existe, no se aplica el override" >&2
+    echo "W: acpi_ivrs_override: ${CPIO} not found, override not applied" >&2
     exit 0
 fi
 

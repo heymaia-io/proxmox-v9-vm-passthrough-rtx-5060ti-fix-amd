@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """
-dump_ivrs.py - Vuelca y decodifica la tabla ACPI IVRS de una maquina AMD.
+dump_ivrs.py - Dump and decode the ACPI IVRS table on an AMD machine.
 
-Sirve para diagnosticar el error de passthrough:
+Use it to diagnose the passthrough error:
 
     "Firmware has requested this device have a 1:1 IOMMU mapping..."
 
-Muestra las entradas IVMD (reservas de memoria del firmware) y, si le pasas la
-direccion PCI de un dispositivo, te dice si cae dentro de alguna de ellas.
+It prints the IVMD entries (the firmware's memory reservations) and, if you give
+it a device's PCI address, tells you whether that device falls inside one.
 
-USO
----
-    sudo ./dump_ivrs.py                          # lee /sys/firmware/acpi/tables/IVRS
-    sudo ./dump_ivrs.py --device 0000:01:00.0    # comprueba un dispositivo concreto
-    ./dump_ivrs.py --file IVRS.original.aml      # analiza un volcado guardado
+USAGE
+-----
+    sudo ./dump_ivrs.py                          # reads /sys/firmware/acpi/tables/IVRS
+    sudo ./dump_ivrs.py --device 0000:01:00.0    # check a specific device
+    ./dump_ivrs.py --file IVRS.original.aml      # analyse a saved dump
 """
 
 import argparse
@@ -32,7 +32,7 @@ def bdf(devid):
 
 
 def parse_device(s):
-    """Convierte '0000:01:00.0' o '01:00.0' en un device ID de 16 bits."""
+    """Convert '0000:01:00.0' or '01:00.0' into a 16-bit device ID."""
     s = s.strip()
     if s.count(":") == 2:
         s = s.split(":", 1)[1]
@@ -41,8 +41,8 @@ def parse_device(s):
         bus, dev = busdev.split(":")
         return (int(bus, 16) << 8) | (int(dev, 16) << 3) | int(func)
     except ValueError:
-        sys.exit(f"ERROR: no entiendo la direccion PCI {s!r}. "
-                 "Formato esperado: 0000:01:00.0")
+        sys.exit(f"ERROR: cannot parse PCI address {s!r}. "
+                 "Expected format: 0000:01:00.0")
 
 
 def walk(data):
@@ -58,22 +58,22 @@ def walk(data):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Decodifica la tabla ACPI IVRS.")
+    ap = argparse.ArgumentParser(description="Decode the ACPI IVRS table.")
     ap.add_argument("--file", default=DEFAULT_PATH,
-                    help=f"tabla a leer (por defecto {DEFAULT_PATH})")
-    ap.add_argument("--device", help="direccion PCI a comprobar, ej. 0000:01:00.0")
+                    help=f"table to read (default {DEFAULT_PATH})")
+    ap.add_argument("--device", help="PCI address to check, e.g. 0000:01:00.0")
     args = ap.parse_args()
 
     try:
         data = open(args.file, "rb").read()
     except PermissionError:
-        sys.exit(f"ERROR: sin permiso para leer {args.file}. Prueba con sudo.")
+        sys.exit(f"ERROR: permission denied reading {args.file}. Try sudo.")
     except FileNotFoundError:
-        sys.exit(f"ERROR: {args.file} no existe. "
-                 "Esta maquina puede no tener IOMMU de AMD.")
+        sys.exit(f"ERROR: {args.file} does not exist. "
+                 "This machine may not have an AMD IOMMU.")
 
     if data[:4] != b"IVRS":
-        sys.exit(f"ERROR: firma inesperada {data[:4]!r}, no es una tabla IVRS")
+        sys.exit(f"ERROR: unexpected signature {data[:4]!r}, not an IVRS table")
 
     oem_id = data[10:16].decode("ascii", "replace").strip("\x00 ")
     oem_table_id = data[16:24].decode("ascii", "replace").strip("\x00 ")
@@ -90,7 +90,7 @@ def main():
             hi = struct.unpack_from("<H", data, off + 6)[0]
             start, mlen = struct.unpack_from("<QQ", data, off + 16)
             ivmds.append((off, typ, flags, lo, hi, start, mlen))
-            print(f"[+0x{off:04x}] IVMD tipo 0x{typ:02x} ({IVMD_TYPES[typ]}) "
+            print(f"[+0x{off:04x}] IVMD type 0x{typ:02x} ({IVMD_TYPES[typ]}) "
                   f"flags=0x{flags:02x}")
             print(f"          devid 0x{lo:04x} ({bdf(lo)}) .. "
                   f"0x{hi:04x} ({bdf(hi)})")
@@ -99,29 +99,29 @@ def main():
             print(f"          unity={bool(flags & 1)} IR={bool(flags & 2)} "
                   f"IW={bool(flags & 4)} exclusion_range={bool(flags & 8)}")
         elif typ in IVHD_TYPES:
-            print(f"[+0x{off:04x}] IVHD tipo 0x{typ:02x} len={length}")
+            print(f"[+0x{off:04x}] IVHD type 0x{typ:02x} len={length}")
 
     if not ivmds:
-        print("No hay entradas IVMD. Este no es el problema que tienes.")
+        print("No IVMD entries. This is not the problem you have.")
         return
 
-    print(f"\nTotal: {len(ivmds)} entradas IVMD")
+    print(f"\nTotal: {len(ivmds)} IVMD entries")
 
     if args.device:
         devid = parse_device(args.device)
         print(f"\n--- {args.device} (devid 0x{devid:04x}) ---")
         hits = [e for e in ivmds if e[3] <= devid <= e[4]]
         if hits:
-            print(f"  CUBIERTO por {len(hits)} entrada(s) IVMD.")
-            print(f"  El kernel marcara require_direct=1 en este dispositivo y")
-            print(f"  VFIO rechazara el passthrough.")
-            print(f"  Bus a excluir con patch_ivrs.py: --bus {devid >> 8:02x}")
+            print(f"  COVERED by {len(hits)} IVMD entry/entries.")
+            print(f"  The kernel will set require_direct=1 on this device and")
+            print(f"  VFIO will refuse the passthrough.")
+            print(f"  Bus to exclude with patch_ivrs.py: --bus {devid >> 8:02x}")
         else:
-            print("  NO cubierto por ninguna IVMD. Tu problema es otro.")
+            print("  NOT covered by any IVMD. Your problem is something else.")
 
-    print("\nComprueba tambien lo que ve el kernel:")
-    print("  cat /sys/bus/pci/devices/<DIR>/iommu_group/reserved_regions")
-    print("  (las lineas 'direct' son las que causan el rechazo)")
+    print("\nAlso check what the kernel sees:")
+    print("  cat /sys/bus/pci/devices/<ADDR>/iommu_group/reserved_regions")
+    print("  ('direct' lines are the ones causing the rejection)")
 
 
 if __name__ == "__main__":

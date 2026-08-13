@@ -1,8 +1,8 @@
-# backups de initrd generados por install.sh (pesan ~75 MB)
+# initrd backups created by install.sh (~75 MB each)
 backup/
 *.bak
 
-# tablas volcadas de la maquina local
+# tables dumped from the local machine
 IVRS.original.aml
 IVRS.patched.aml
 !examples/*.aml

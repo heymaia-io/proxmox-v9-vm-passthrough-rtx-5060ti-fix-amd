@@ -1,10 +1,10 @@
 #!/bin/bash
-# uninstall.sh - Quita el override de tabla ACPI IVRS y deja el sistema como estaba.
+# uninstall.sh - Remove the ACPI IVRS override and put the system back as it was.
 #
-#   sudo ./uninstall.sh [version-de-kernel]
+#   sudo ./uninstall.sh [kernel-version]
 #
-# Si el sistema NO arranca, elige un kernel anterior en el menu de GRUB
-# (Advanced options for ...) cuyo initrd no lleve el override, y ejecuta esto.
+# If the system does NOT boot, pick an older kernel from the GRUB menu
+# (Advanced options for ...) whose initrd has no override, and run this from there.
 
 set -euo pipefail
 
@@ -14,41 +14,40 @@ CPIO_DIR=/usr/local/lib/acpi-override
 HOOK_PATH=/etc/initramfs-tools/hooks/acpi_ivrs_override
 
 if [ "$(id -u)" -ne 0 ]; then
-    echo "ERROR: hay que ejecutarlo como root" >&2
+    echo "ERROR: must be run as root" >&2
     exit 1
 fi
 
-echo "== Quitando el hook =="
+echo "== Removing the hook =="
 if [ -e "${HOOK_PATH}" ]; then
     rm -f "${HOOK_PATH}"
-    echo "  borrado ${HOOK_PATH}"
+    echo "  removed ${HOOK_PATH}"
 else
-    echo "  ${HOOK_PATH} no existia"
+    echo "  ${HOOK_PATH} did not exist"
 fi
 
 echo
-echo "== Quitando el cpio =="
+echo "== Removing the cpio =="
 if [ -d "${CPIO_DIR}" ]; then
     rm -rf "${CPIO_DIR}"
-    echo "  borrado ${CPIO_DIR}"
+    echo "  removed ${CPIO_DIR}"
 else
-    echo "  ${CPIO_DIR} no existia"
+    echo "  ${CPIO_DIR} did not exist"
 fi
 
 echo
-echo "== Regenerando initramfs de ${KVER} =="
+echo "== Regenerating initramfs for ${KVER} =="
 update-initramfs -u -k "${KVER}"
 
 cat <<EOF
 
 ===========================================================================
-Desinstalado. Reinicia para volver a la tabla IVRS del firmware.
+Uninstalled. Reboot to go back to the firmware's IVRS table.
 
-Tras el reinicio, para confirmar que el override ya no se aplica:
+After rebooting, to confirm the override is no longer applied:
 
-    dmesg | grep -i 'Table Upgrade'      -> no debe imprimir nada
+    dmesg | grep -i 'Table Upgrade'      -> should print nothing
 
-Si habias desactivado Secure Boot solo para esto, ya lo puedes reactivar
-en el BIOS.
+If you disabled Secure Boot only for this, you can re-enable it in the BIOS.
 ===========================================================================
 EOF

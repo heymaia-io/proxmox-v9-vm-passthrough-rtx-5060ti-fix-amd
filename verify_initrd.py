@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
 """
-verify_initrd.py - Comprueba que la tabla ACPI parcheada viaja dentro del initramfs.
+verify_initrd.py - Check that the patched ACPI table actually travels inside the
+initramfs.
 
-POR QUE HACE FALTA UNA HERRAMIENTA PARA ESTO
----------------------------------------------
-`cpio -it < initrd.img` NO sirve: el initramfs es una concatenacion de varios
-archivos cpio (microcodigo, firmware, nuestro override) seguidos del cpio
-principal comprimido. GNU cpio se detiene en el TRAILER!!! del primero, asi que
-parece que el override no esta cuando en realidad si esta.
+WHY A DEDICATED TOOL IS NEEDED
+------------------------------
+`cpio -it < initrd.img` does NOT work here: the initramfs is a concatenation of
+several cpio archives (microcode, firmware, our override) followed by the main
+compressed one. GNU cpio stops at the first TRAILER!!!, so it looks like the
+override is missing when in fact it is there.
 
-Este script recorre TODOS los cpio del prefijo no comprimido y extrae la tabla
-para compararla con la que esperabas instalar.
+This script walks every cpio archive in the uncompressed prefix and extracts the
+table to compare it with the one you meant to install.
 
-USO
----
+USAGE
+-----
     ./verify_initrd.py /boot/initrd.img-$(uname -r) IVRS.patched.aml
 """
 
@@ -22,12 +23,12 @@ import struct
 import sys
 
 CPIO_MAGIC = b"070701"
-# El prefijo no comprimido nunca es grande; mas alla de esto es el cpio principal
+# The uncompressed prefix is never large; past this it is the main cpio
 SCAN_LIMIT = 8 * 1024 * 1024
 
 
 def iter_cpio_members(data):
-    """Recorre los archivos cpio 'newc' concatenados al principio del initrd."""
+    """Walk the concatenated 'newc' cpio archives at the start of the initrd."""
     off = 0
     while True:
         while off < len(data) and data[off:off + 6] != CPIO_MAGIC:
@@ -63,7 +64,7 @@ def iter_cpio_members(data):
 
 def main():
     if len(sys.argv) != 3:
-        sys.exit(f"uso: {sys.argv[0]} <initrd.img> <tabla_esperada.aml>")
+        sys.exit(f"usage: {sys.argv[0]} <initrd.img> <expected_table.aml>")
 
     initrd_path, expected_path = sys.argv[1], sys.argv[2]
 
@@ -71,7 +72,7 @@ def main():
     expected = open(expected_path, "rb").read()
 
     print(f"initrd: {initrd_path} ({len(data)} bytes)")
-    print("\nMiembros del early-initramfs (todos los cpio concatenados):")
+    print("\nEarly-initramfs members (all concatenated cpio archives):")
 
     found = None
     for name, content in iter_cpio_members(data):
@@ -81,9 +82,9 @@ def main():
 
     print()
     if found is None:
-        print(">>> NO se encontro ninguna tabla .aml en el initrd.")
-        print("    Revisa que el hook este instalado y que hayas corrido")
-        print("    update-initramfs despues de instalarlo.")
+        print(">>> No .aml table found in the initrd.")
+        print("    Check that the hook is installed and that you ran")
+        print("    update-initramfs after installing it.")
         sys.exit(1)
 
     name, content = found
@@ -92,17 +93,17 @@ def main():
     oem_rev = struct.unpack_from("<I", content, 24)[0]
 
     print(f">>> {name}: {len(content)} bytes")
-    print(f"    sha256 en initrd : {got}")
-    print(f"    sha256 esperado  : {want}")
-    print(f"    COINCIDE         : {got == want}")
-    print(f"    firma            : {content[:4].decode('ascii', 'replace')}")
+    print(f"    sha256 in initrd : {got}")
+    print(f"    sha256 expected  : {want}")
+    print(f"    MATCH            : {got == want}")
+    print(f"    signature        : {content[:4].decode('ascii', 'replace')}")
     print(f"    checksum ok      : {(sum(content) & 0xff) == 0}")
     print(f"    oem_revision     : {oem_rev}")
 
     if got != want:
         sys.exit(1)
 
-    print("\nTodo correcto. Reinicia y comprueba con:")
+    print("\nAll good. Reboot and check with:")
     print("    dmesg | grep -i 'Table Upgrade'")
 
 

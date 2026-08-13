@@ -1,42 +1,42 @@
 #!/bin/bash
-# check.sh - Diagnostico de solo lectura para el error
+# check.sh - Read-only diagnostics for the error
 # "Firmware has requested this device have a 1:1 IOMMU mapping".
 #
-#   sudo ./check.sh [direccion-pci]
+#   sudo ./check.sh [pci-address]
 #
-# Ejemplo:
+# Example:
 #   sudo ./check.sh 0000:01:00.0
 #
-# No modifica nada.
+# Modifies nothing.
 
 DEV="${1:-}"
 
 echo "======================================================================"
-echo " 1. Sistema"
+echo " 1. System"
 echo "======================================================================"
 uname -r
 grep -E 'CONFIG_ACPI_TABLE_UPGRADE' "/boot/config-$(uname -r)" 2>/dev/null \
-    || echo "CONFIG_ACPI_TABLE_UPGRADE: no encontrado (el metodo no funcionara)"
-echo -n "lockdown: "; cat /sys/kernel/security/lockdown 2>/dev/null || echo "no expuesto"
+    || echo "CONFIG_ACPI_TABLE_UPGRADE: not found (this method will not work)"
+echo -n "lockdown: "; cat /sys/kernel/security/lockdown 2>/dev/null || echo "not exposed"
 command -v mokutil >/dev/null && mokutil --sb-state 2>/dev/null
 
 echo
 echo "======================================================================"
-echo " 2. El error, si ya ocurrio"
+echo " 2. The error, if it already happened"
 echo "======================================================================"
-dmesg | grep -i '1:1 IOMMU mapping' | tail -5 || echo "(no aparece en dmesg)"
+dmesg | grep -i '1:1 IOMMU mapping' | tail -5 || echo "(not present in dmesg)"
 
 echo
 echo "======================================================================"
-echo " 3. Se aplico algun override de tabla ACPI?"
+echo " 3. Was any ACPI table override applied?"
 echo "======================================================================"
-dmesg | grep -iE 'Table Upgrade|table found in initrd' || echo "(ninguno)"
+dmesg | grep -iE 'Table Upgrade|table found in initrd' || echo "(none)"
 
 echo
 echo "======================================================================"
-echo " 4. Regiones reservadas por dispositivo"
+echo " 4. Reserved regions per device"
 echo "======================================================================"
-echo "Las lineas 'direct' son las que provocan el rechazo de VFIO."
+echo "The 'direct' lines are what makes VFIO refuse the passthrough."
 echo
 for d in /sys/bus/pci/devices/*; do
     rr="$d/iommu_group/reserved_regions"
@@ -48,19 +48,19 @@ for d in /sys/bus/pci/devices/*; do
     printf "  direct=%s  %s\n" "$n" "${desc:-$addr}"
 done
 echo
-echo "(los dispositivos sin lineas 'direct' no se listan)"
+echo "(devices without 'direct' lines are not listed)"
 
 if [ -n "$DEV" ]; then
     echo
     echo "======================================================================"
-    echo " 5. Detalle de $DEV"
+    echo " 5. Details for $DEV"
     echo "======================================================================"
     rr="/sys/bus/pci/devices/$DEV/iommu_group/reserved_regions"
     if [ -r "$rr" ]; then
         cat "$rr"
         grp=$(basename "$(readlink -f "/sys/bus/pci/devices/$DEV/iommu_group")")
         echo
-        echo "Grupo IOMMU $grp contiene:"
+        echo "IOMMU group $grp contains:"
         for x in /sys/kernel/iommu_groups/"$grp"/devices/*; do
             a=$(basename "$x")
             echo "  $a  $(lspci -nns "${a#0000:}" 2>/dev/null | cut -d' ' -f2- | cut -c1-60)"
@@ -68,13 +68,13 @@ if [ -n "$DEV" ]; then
         echo
         lspci -nnks "${DEV#0000:}" | grep -iE 'driver|modules'
     else
-        echo "No existe $rr"
+        echo "$rr does not exist"
     fi
 fi
 
 echo
 echo "======================================================================"
-echo " Siguiente paso"
+echo " Next step"
 echo "======================================================================"
-echo "Si tu dispositivo aparece con lineas 'direct', decodifica la IVRS:"
+echo "If your device shows 'direct' lines, decode the IVRS table:"
 echo "    sudo ./dump_ivrs.py --device ${DEV:-0000:01:00.0}"

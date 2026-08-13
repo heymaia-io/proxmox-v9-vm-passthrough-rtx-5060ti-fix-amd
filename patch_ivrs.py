@@ -1,41 +1,40 @@
 #!/usr/bin/env python3
 """
-patch_ivrs.py - Genera una tabla ACPI IVRS parcheada que excluye un bus PCI
-concreto de las reservas IVMD declaradas por el firmware.
+patch_ivrs.py - Generate a patched ACPI IVRS table that excludes one PCI bus
+from the IVMD reservations declared by the firmware.
 
-PARA QUE SIRVE
---------------
-Algunas placas AMD declaran entradas IVMD en su tabla ACPI IVRS que cubren un
-rango amplio de device IDs. El kernel las traduce a reservas IOMMU_RESV_DIRECT y
-marca require_direct=1 en todos los dispositivos del rango. Cuando VFIO intenta
-reclamar uno de ellos para passthrough, adjunta un blocking domain y el core del
-IOMMU lo rechaza:
+WHAT THIS IS FOR
+----------------
+Some AMD boards declare IVMD entries in their ACPI IVRS table covering a wide
+range of device IDs. The kernel turns those into IOMMU_RESV_DIRECT reservations
+and sets require_direct=1 on every device in the range. When VFIO tries to claim
+one of them for passthrough, it attaches a blocking domain and the IOMMU core
+rejects it:
 
     "Firmware has requested this device have a 1:1 IOMMU mapping, rejecting
      configuring the device without a 1:1 mapping. Contact your platform vendor."
 
-Este script parte esas entradas en dos rangos que saltan el bus indicado, de
-forma que el dispositivo que quieres pasar a una VM queda fuera y todo el resto
-del sistema conserva la reserva que pidio el firmware.
+This script splits those entries into two ranges that skip the given bus, so the
+device you want to pass through falls outside while the rest of the system keeps
+the reservation the firmware asked for.
 
-USO
----
-    # 1. volcar la tabla real de tu maquina
+USAGE
+-----
+    # 1. dump the real table from your machine
     cp /sys/firmware/acpi/tables/IVRS IVRS.original.aml
 
-    # 2. parchearla excluyendo el bus donde vive tu dispositivo
+    # 2. patch it, excluding the bus your device lives on
     ./patch_ivrs.py IVRS.original.aml IVRS.patched.aml --bus 01
 
-El bus se saca de la direccion PCI del dispositivo: en 0000:01:00.0 el bus es 01.
+The bus comes from the device's PCI address: in 0000:01:00.0 the bus is 01.
 
-DOS DETALLES QUE HACEN FALTA PARA QUE EL KERNEL ACEPTE LA TABLA
----------------------------------------------------------------
-1. El checksum de la cabecera ACPI debe recalcularse (suma de todos los bytes
-   igual a 0 modulo 256).
+TWO THINGS THE KERNEL REQUIRES FOR THE TABLE TO BE ACCEPTED
+-----------------------------------------------------------
+1. The ACPI header checksum must be recomputed (all bytes must sum to 0 mod 256).
 
-2. El campo oem_revision DEBE ser mayor que el de la tabla del firmware. Si no,
-   acpi_table_initrd_override() en drivers/acpi/tables.c la descarta SIN IMPRIMIR
-   NINGUN MENSAJE:
+2. oem_revision MUST be greater than the firmware table's. Otherwise
+   acpi_table_initrd_override() in drivers/acpi/tables.c discards it WITHOUT
+   PRINTING ANY MESSAGE AT ALL:
 
        if (test_and_set_bit(table_index, acpi_initrd_installed) ||
            existing_table->oem_revision >= table->oem_revision) {
@@ -43,7 +42,7 @@ DOS DETALLES QUE HACEN FALTA PARA QUE EL KERNEL ACEPTE LA TABLA
                goto next_table;
        }
 
-   Este script lo incrementa automaticamente.
+   This script bumps it automatically.
 """
 
 import argparse
@@ -53,7 +52,7 @@ import sys
 IVMD_TYPES = (0x20, 0x21, 0x22)  # ALL devices / SPECIFIED device / DEVICE RANGE
 IVMD_RANGE = 0x22
 
-# Offsets dentro de la cabecera ACPI estandar (36 bytes)
+# Offsets within the standard 36-byte ACPI header
 OFF_SIGNATURE = 0
 OFF_LENGTH = 4
 OFF_CHECKSUM = 9
@@ -61,17 +60,17 @@ OFF_OEM_ID = 10
 OFF_OEM_TABLE_ID = 16
 OFF_OEM_REVISION = 24
 
-# El cuerpo de IVRS empieza tras la cabecera ACPI (36) + IVinfo (4) + reservado (8)
+# The IVRS body starts after the ACPI header (36) + IVinfo (4) + reserved (8)
 BODY_START = 48
 
 
 def bdf(devid):
-    """Formatea un device ID de 16 bits como bus:dispositivo.funcion."""
+    """Format a 16-bit device ID as bus:device.function."""
     return f"{devid >> 8:02x}:{(devid >> 3) & 0x1f:02x}.{devid & 7}"
 
 
 def walk(data):
-    """Itera las entradas del cuerpo de IVRS: (offset, tipo, flags, longitud)."""
+    """Iterate over the IVRS body entries: (offset, type, flags, length)."""
     off = BODY_START
     while off + 4 <= len(data):
         typ = data[off]
@@ -98,7 +97,7 @@ def describe(data, label):
 
 
 def covering(data, devid):
-    """Offsets de las IVMD que cubren un devid dado."""
+    """Offsets of the IVMD entries covering a given device ID."""
     hits = []
     for off, typ, _flags, _length in walk(data):
         if typ in IVMD_TYPES:
@@ -110,9 +109,9 @@ def covering(data, devid):
 
 
 def patch(data, bus):
-    """Parte las IVMD que cubren `bus` en dos rangos que lo excluyen."""
-    lo_end = (bus << 8) - 1        # ultimo devid antes del bus
-    hi_start = (bus + 1) << 8      # primer devid despues del bus
+    """Split the IVMD entries covering `bus` into two ranges that exclude it."""
+    lo_end = (bus << 8) - 1        # last device ID before the bus
+    hi_start = (bus + 1) << 8      # first device ID after the bus
     bus_lo = bus << 8
     bus_hi = (bus << 8) | 0xFF
 
@@ -126,14 +125,14 @@ def patch(data, bus):
         lo = struct.unpack_from("<H", data, off + 4)[0]
         hi = struct.unpack_from("<H", data, off + 6)[0]
 
-        # Solo tocamos rangos que cubren el bus entero
+        # Only touch ranges that cover the whole bus
         if not (lo <= bus_lo and hi >= bus_hi):
             continue
 
-        # 1) acortar la entrada existente para que termine antes del bus
+        # 1) shorten the existing entry so it ends before the bus
         struct.pack_into("<H", out, off + 6, lo_end)
 
-        # 2) clonarla para cubrir desde despues del bus hasta el fin original
+        # 2) clone it to cover from after the bus to the original end
         clone = bytearray(data[off:off + length])
         struct.pack_into("<H", clone, 4, hi_start)
         struct.pack_into("<H", clone, 6, hi)
@@ -141,21 +140,21 @@ def patch(data, bus):
         patched += 1
 
     if patched == 0:
-        sys.exit(f"ERROR: ninguna IVMD de rango cubre el bus 0x{bus:02x}. "
-                 "Nada que parchear: tu problema es otro.")
+        sys.exit(f"ERROR: no IVMD range covers bus 0x{bus:02x}. "
+                 "Nothing to patch: your problem is something else.")
 
-    # Insertar las entradas nuevas justo despues de la ultima IVMD original,
-    # conservando el orden estructural de la tabla.
+    # Insert the new entries right after the last original IVMD, preserving the
+    # structural order of the table.
     last_ivmd_end = max(off + length for off, typ, _f, length in walk(data)
                         if typ in IVMD_TYPES)
     out = out[:last_ivmd_end] + new_entries + out[last_ivmd_end:]
 
-    # CRITICO: incrementar oem_revision. Sin esto el kernel descarta la tabla
-    # en silencio (ver docstring).
+    # CRITICAL: bump oem_revision. Without this the kernel silently discards the
+    # table (see module docstring).
     old_rev = struct.unpack_from("<I", out, OFF_OEM_REVISION)[0]
     struct.pack_into("<I", out, OFF_OEM_REVISION, old_rev + 1)
 
-    # Actualizar Length de la cabecera y recalcular checksum
+    # Update the header Length and recompute the checksum
     struct.pack_into("<I", out, OFF_LENGTH, len(out))
     out[OFF_CHECKSUM] = 0
     out[OFF_CHECKSUM] = (-sum(out)) & 0xFF
@@ -165,81 +164,81 @@ def patch(data, bus):
 
 def main():
     ap = argparse.ArgumentParser(
-        description="Parchea una tabla ACPI IVRS para excluir un bus PCI de las "
-                    "reservas IVMD del firmware.")
-    ap.add_argument("input", help="tabla IVRS original "
+        description="Patch an ACPI IVRS table to exclude a PCI bus from the "
+                    "firmware's IVMD reservations.")
+    ap.add_argument("input", help="original IVRS table "
                                   "(cp /sys/firmware/acpi/tables/IVRS ...)")
-    ap.add_argument("output", help="ruta donde escribir la tabla parcheada")
+    ap.add_argument("output", help="path to write the patched table to")
     ap.add_argument("--bus", required=True,
-                    help="bus PCI a excluir, en hex. Para 0000:01:00.0 usa 01")
+                    help="PCI bus to exclude, in hex. For 0000:01:00.0 use 01")
     args = ap.parse_args()
 
     try:
         bus = int(args.bus, 16)
     except ValueError:
-        sys.exit(f"ERROR: --bus debe ser hexadecimal (ej. 01), recibido {args.bus!r}")
+        sys.exit(f"ERROR: --bus must be hexadecimal (e.g. 01), got {args.bus!r}")
     if not 0 <= bus <= 0xFF:
-        sys.exit("ERROR: --bus fuera de rango (00..ff)")
+        sys.exit("ERROR: --bus out of range (00..ff)")
 
     original = open(args.input, "rb").read()
 
     if original[OFF_SIGNATURE:OFF_SIGNATURE + 4] != b"IVRS":
-        sys.exit(f"ERROR: {args.input} no es una tabla IVRS "
-                 f"(firma={original[:4]!r})")
+        sys.exit(f"ERROR: {args.input} is not an IVRS table "
+                 f"(signature={original[:4]!r})")
     if (sum(original) & 0xFF) != 0:
-        sys.exit("ERROR: el checksum de la tabla original no cuadra. "
-                 "Vuelve a volcarla desde /sys/firmware/acpi/tables/IVRS.")
+        sys.exit("ERROR: the original table's checksum does not add up. "
+                 "Re-dump it from /sys/firmware/acpi/tables/IVRS.")
 
-    gpu_lo = bus << 8
-    gpu_hi = (bus << 8) | 0xFF
+    dev_lo = bus << 8
+    dev_hi = (bus << 8) | 0xFF
 
     describe(original, "ORIGINAL")
     patched_data, n = patch(original, bus)
     print()
-    describe(patched_data, "PARCHEADA")
+    describe(patched_data, "PATCHED")
 
-    # --- Verificaciones duras: si alguna falla, no se escribe nada ---
+    # --- Hard checks: if any fails, nothing is written ---
     checks = [
-        ("checksum valido",
+        ("checksum is valid",
          (sum(patched_data) & 0xFF) == 0),
-        ("Length de cabecera coincide",
+        ("header Length matches actual size",
          struct.unpack_from("<I", patched_data, OFF_LENGTH)[0] == len(patched_data)),
-        (f"bus 0x{bus:02x} (funcion .0) YA NO esta cubierto",
-         len(covering(patched_data, gpu_lo)) == 0),
-        (f"bus 0x{bus:02x} (funcion .7) YA NO esta cubierto",
-         len(covering(patched_data, gpu_lo | 7)) == 0),
-        (f"bus 0x{bus:02x} (ultimo devid) YA NO esta cubierto",
-         len(covering(patched_data, gpu_hi)) == 0),
-        ("el resto de dispositivos conserva su reserva",
+        (f"bus 0x{bus:02x} (function .0) is NO LONGER covered",
+         len(covering(patched_data, dev_lo)) == 0),
+        (f"bus 0x{bus:02x} (function .7) is NO LONGER covered",
+         len(covering(patched_data, dev_lo | 7)) == 0),
+        (f"bus 0x{bus:02x} (last device ID) is NO LONGER covered",
+         len(covering(patched_data, dev_hi)) == 0),
+        ("every other device keeps its reservation",
          all(len(covering(patched_data, d)) == n
-             for d in (0x0002, gpu_lo - 1, gpu_hi + 1)
-             if 0 <= d <= 0xFFFF and not (gpu_lo <= d <= gpu_hi)
+             for d in (0x0002, dev_lo - 1, dev_hi + 1)
+             if 0 <= d <= 0xFFFF and not (dev_lo <= d <= dev_hi)
              and len(covering(original, d)) == n)),
-        ("oem_revision SUPERA la del firmware (si no, se ignora en silencio)",
+        ("oem_revision EXCEEDS the firmware's (otherwise silently ignored)",
          struct.unpack_from("<I", patched_data, OFF_OEM_REVISION)[0] >
          struct.unpack_from("<I", original, OFF_OEM_REVISION)[0]),
-        ("signature/oem_id/oem_table_id intactos (criterio de match del kernel)",
+        ("signature/oem_id/oem_table_id untouched (the kernel's match criteria)",
          patched_data[0:4] == original[0:4]
          and patched_data[OFF_OEM_ID:OFF_OEM_ID + 6] == original[OFF_OEM_ID:OFF_OEM_ID + 6]
          and patched_data[OFF_OEM_TABLE_ID:OFF_OEM_TABLE_ID + 8]
          == original[OFF_OEM_TABLE_ID:OFF_OEM_TABLE_ID + 8]),
-        ("numero de bloques IVHD sin cambios",
+        ("IVHD block count unchanged",
          sum(1 for _o, t, _f, _l in walk(original) if t not in IVMD_TYPES) ==
          sum(1 for _o, t, _f, _l in walk(patched_data) if t not in IVMD_TYPES)),
     ]
 
-    print("\n--- VERIFICACION ---")
+    print("\n--- VERIFICATION ---")
     ok = True
     for name, result in checks:
-        print(f"  [{'OK ' if result else 'FALLO'}] {name}")
+        print(f"  [{'OK  ' if result else 'FAIL'}] {name}")
         ok = ok and result
 
     if not ok:
-        sys.exit("\nABORTADO: alguna verificacion fallo, no se escribio el archivo.")
+        sys.exit("\nABORTED: a check failed, nothing was written.")
 
     with open(args.output, "wb") as f:
         f.write(patched_data)
-    print(f"\nEscrito: {args.output} ({len(patched_data)} bytes, {n} IVMD divididas)")
+    print(f"\nWrote: {args.output} ({len(patched_data)} bytes, {n} IVMD entries split)")
     print(f"oem_revision: {struct.unpack_from('<I', original, OFF_OEM_REVISION)[0]}"
           f" -> {struct.unpack_from('<I', patched_data, OFF_OEM_REVISION)[0]}")
 
