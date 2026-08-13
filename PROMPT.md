@@ -121,7 +121,57 @@ Stop here and ask the user to disable Secure Boot in the BIOS. Tell them:
 
 They must reboot before you can continue. When they return, re-check lockdown before doing anything else.
 
-**If only one kernel is installed:** warn the user that they will have no clean fallback entry in the GRUB menu. Recommend installing a second kernel first.
+### 2b. Make sure a fallback kernel exists — before Phase 4
+
+The whole rollback strategy rests on having a second kernel in the GRUB menu whose initrd carries **no** override. If the machine has only ever run one kernel, that escape hatch does not exist and you must create it first.
+
+```bash
+ls /boot/vmlinuz-*                          # generic
+proxmox-boot-tool kernel list               # Proxmox
+dpkg -l 'proxmox-kernel-6*' | awk '/^ii/{print $2}'
+```
+
+If only one kernel is present, ask the user to install a second one.
+
+<!-- ordering matters more than it looks -->
+> **Install it before Phase 4, never after.** Installing a kernel runs `update-initramfs` for it, which executes every hook — including this one, once installed. A fallback kernel added *after* the hook would carry the override too, and would be useless as a rollback path. Order: install the fallback kernel → then install the override.
+>
+> If the user already installed the hook and only then realises they need a fallback, they must regenerate that kernel's initrd with the hook temporarily removed, or the fallback is contaminated.
+
+#### Which kernel to install
+
+**Stay inside the same upstream series as the running kernel.** If they are on `6.17.x`, the fallback must also be `6.17.x` — not `6.14.x`, not `6.10.x`.
+
+Jumping to an older branch looks like a safe move and is not. Out-of-tree modules the system may depend on to boot at all — ZFS above all, plus any DKMS drivers — are built against a specific kernel ABI. On a ZFS-on-root host, a fallback kernel whose ZFS module does not load leaves the machine unable to mount its root pool, which is a far worse position than the bug you are fixing.
+
+Within that series, pick by where they currently sit:
+
+| Situation | Install |
+|---|---|
+| Running the newest release in the series | The **previous** release in the same series |
+| Running an older release in the series | The **newest** release in the same series |
+
+Either way you end up with two neighbouring versions, one of which is known to boot.
+
+```bash
+# what exists in the same series (adjust 6.17 to match)
+apt-cache search '^proxmox-kernel-6\.17\.[0-9]' | sort     # Proxmox
+apt-cache search '^linux-image-6\.17\.[0-9]'   | sort     # Debian/Ubuntu
+
+# install a specific one — on Proxmox prefer the signed variant
+apt install proxmox-kernel-6.17.13-2-pve-signed
+```
+
+Then confirm it is really there and bootable:
+
+```bash
+ls /boot/vmlinuz-* /boot/initrd.img-*
+proxmox-boot-tool kernel list
+```
+
+**Never uninstall the old kernel** to tidy up. It is the safety net.
+
+Ideally the user reboots once into the newly installed kernel to prove it boots, then reboots back. This is optional, but a fallback that has never been booted is an assumption, not a guarantee.
 
 ---
 

@@ -68,9 +68,27 @@ Compared to compiling a patched kernel, this takes seconds instead of hours and 
 | `CONFIG_ACPI_TABLE_UPGRADE=y` | `grep ACPI_TABLE_UPGRADE /boot/config-$(uname -r)` |
 | `initramfs-tools` >= 0.140 | `dpkg -l initramfs-tools` |
 | **Secure Boot disabled** | `cat /sys/kernel/security/lockdown` must say `[none]` |
+| **A second kernel installed** | `ls /boot/vmlinuz-*` — see below |
 | Python 3 | already present on Proxmox |
 
 **Secure Boot is a hard blocker, not a recommendation.** Under `integrity` lockdown, `acpi_table_upgrade()` is skipped entirely and the override does nothing. You have to disable it in the BIOS. An unsigned patched kernel would carry the same requirement.
+
+### About that second kernel
+
+The rollback plan is "boot the other kernel from the GRUB menu", so you need one whose initrd carries no override. Many hosts already have two because of a past upgrade. If yours only has one, install a second **before** installing the override:
+
+> Installing a kernel runs `update-initramfs` for it, which executes every hook — including this one. A fallback kernel added *after* the override would carry the override too, and would be worthless as a rollback path.
+
+**Stay inside the same upstream series.** On `6.17.x`, install another `6.17.x` — not `6.14.x`, not `6.10.x`. Dropping to an older branch looks safer and is not: out-of-tree modules you may need to boot at all (ZFS above all, plus any DKMS drivers) are built against a specific kernel ABI. On a ZFS-on-root host, a fallback whose ZFS module will not load leaves you unable to mount your root pool — a worse place than the bug you are fixing.
+
+Within the series: if you are on the newest release, install the previous one; if you are on an older one, install the newest.
+
+```bash
+apt-cache search '^proxmox-kernel-6\.17\.[0-9]' | sort   # see what exists
+apt install proxmox-kernel-6.17.13-2-pve-signed          # pick a neighbour
+```
+
+Never uninstall the old kernel to tidy up — it is the safety net.
 
 ---
 
