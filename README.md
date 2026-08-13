@@ -106,22 +106,7 @@ Compared to compiling a patched kernel, this takes seconds instead of hours and 
 
 **Secure Boot is a hard blocker, not a recommendation.** Under `integrity` lockdown, `acpi_table_upgrade()` is skipped entirely and the override does nothing. You have to disable it in the BIOS. An unsigned patched kernel would carry the same requirement.
 
-### About that second kernel
-
-The rollback plan is "boot the other kernel from the GRUB menu", so you need one whose initrd carries no override. Many hosts already have two because of a past upgrade. If yours only has one, install a second **before** installing the override:
-
-> Installing a kernel runs `update-initramfs` for it, which executes every hook — including this one. A fallback kernel added *after* the override would carry the override too, and would be worthless as a rollback path.
-
-**Stay inside the same upstream series.** On `6.17.x`, install another `6.17.x` — not `6.14.x`, not `6.10.x`. Dropping to an older branch looks safer and is not: out-of-tree modules you may need to boot at all (ZFS above all, plus any DKMS drivers) are built against a specific kernel ABI. On a ZFS-on-root host, a fallback whose ZFS module will not load leaves you unable to mount your root pool — a worse place than the bug you are fixing.
-
-Within the series: if you are on the newest release, install the previous one; if you are on an older one, install the newest.
-
-```bash
-apt-cache search '^proxmox-kernel-6\.17\.[0-9]' | sort   # see what exists
-apt install proxmox-kernel-6.17.13-2-pve-signed          # pick a neighbour
-```
-
-Never uninstall the old kernel to tidy up — it is the safety net.
+**The second kernel is your rollback path.** The recovery plan is "boot the other kernel from the GRUB menu", so you need one whose initrd carries no override. Many hosts already have two by accident of a past upgrade; a fresh install often has only one. [Step 2](#2-make-sure-you-have-a-fallback-kernel) covers how to add one and which version to pick — do it **before** installing the override, for a reason that is easy to miss.
 
 ---
 
@@ -151,7 +136,49 @@ sudo ./dump_ivrs.py --device 0000:01:00.0
 
 It will tell you whether the device falls inside an IVMD entry and which bus to exclude. If it says the device is not covered, **your problem is something else** and this repo will not help.
 
-### 2. Patch the table
+### 2. Make sure you have a fallback kernel
+
+Do this now, before anything is installed. If the fix goes wrong, this is how you get back in.
+
+```bash
+ls /boot/vmlinuz-*                # generic
+proxmox-boot-tool kernel list     # Proxmox
+```
+
+**If you already have two or more, skip to step 3.** If you have only one, install a second.
+
+> **Order matters, and it is easy to get wrong.** Installing a kernel runs `update-initramfs` for it, which executes every hook — including this one, once it is installed. A fallback kernel added *after* the override would carry the override too, and would be worthless for rollback. Install it **first**.
+>
+> If you only realise this later, regenerate that kernel's initrd with the hook temporarily removed, or your fallback is contaminated.
+
+**Which version: stay inside the same upstream series.** On `6.17.x`, install another `6.17.x` — not `6.14.x`, not `6.10.x`.
+
+Dropping to an older branch feels safer and is not. Out-of-tree modules you may need to boot at all — ZFS above all, plus any DKMS drivers — are built against a specific kernel ABI. On a ZFS-on-root host, a fallback whose ZFS module will not load leaves you unable to mount your root pool: a worse position than the bug you came here to fix.
+
+Within that series, pick the neighbour:
+
+| Your situation | Install |
+|---|---|
+| Running the newest release in the series | The **previous** release in the same series |
+| Running an older release in the series | The **newest** release in the same series |
+
+```bash
+# see what exists in your series (adjust 6.17 to match yours)
+apt-cache search '^proxmox-kernel-6\.17\.[0-9]' | sort    # Proxmox
+apt-cache search '^linux-image-6\.17\.[0-9]'   | sort    # Debian/Ubuntu
+
+# install a neighbour — on Proxmox prefer the signed variant
+apt install proxmox-kernel-6.17.13-2-pve-signed
+
+# confirm it landed
+ls /boot/vmlinuz-* /boot/initrd.img-*
+```
+
+**Never uninstall the old kernel** to tidy up — it is the safety net.
+
+Ideally reboot once into the new kernel to prove it actually boots, then reboot back. A fallback that has never been booted is an assumption, not a guarantee.
+
+### 3. Patch the table
 
 ```bash
 sudo cp /sys/firmware/acpi/tables/IVRS IVRS.original.aml
@@ -160,7 +187,7 @@ sudo cp /sys/firmware/acpi/tables/IVRS IVRS.original.aml
 
 The bus comes from the PCI address: in `0000:01:00.0` it is `01`. The script runs nine checks and **writes nothing if any of them fails**.
 
-### 3. Install
+### 4. Install
 
 ```bash
 sudo ./install.sh IVRS.patched.aml
@@ -170,7 +197,7 @@ Verifies the requirements, packs the table into a cpio archive, installs the hoo
 
 > **It regenerates a single kernel on purpose.** Using `update-initramfs -u -k all` would apply the override to your older kernels too, and those are exactly your rollback path if the system fails to boot.
 
-### 4. Reboot and verify
+### 5. Reboot and verify
 
 ```bash
 dmesg | grep -i 'Table Upgrade'
@@ -181,9 +208,12 @@ stat -c%s /sys/firmware/acpi/tables/IVRS
 
 cat /sys/bus/pci/devices/0000:01:00.0/iommu_group/reserved_regions
 #   -> the 'direct' lines should be gone
+
+cat /sys/bus/pci/devices/0000:02:00.0/iommu_group/reserved_regions
+#   -> another device: 'direct' lines still there, confirming the cut was surgical
 ```
 
-If all three look right, start the VM.
+If those look right, start the VM.
 
 ### Rollback
 
