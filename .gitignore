@@ -1,0 +1,11 @@
+# backups de initrd generados por install.sh (pesan ~75 MB)
+backup/
+*.bak
+
+# tablas volcadas de la maquina local
+IVRS.original.aml
+IVRS.patched.aml
+!examples/*.aml
+
+__pycache__/
+*.pyc
