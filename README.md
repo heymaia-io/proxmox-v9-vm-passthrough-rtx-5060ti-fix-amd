@@ -1,3 +1,36 @@
+> ## ⚠️ Read this first — use at your own risk
+>
+> **This is not a product, a supported tool, or professional advice. It is a written record of the steps that worked on one specific machine.**
+>
+> Everything here was developed against, and only ever verified on, this exact combination:
+>
+> | | |
+> |---|---|
+> | Hypervisor | Proxmox VE 9.1.6 |
+> | Kernel | 6.17.13-21-pve (ZFS on root) |
+> | Motherboard | MSI PRO B850M-A WIFI (MS-7E66) |
+> | BIOS | 2.A30, dated 2026-01-21 |
+> | Device passed through | NVIDIA RTX 5060 Ti, GB206 — `10de:2d04` |
+> | Exact error | `vfio-pci: Firmware has requested this device have a 1:1 IOMMU mapping` |
+>
+> **It worked there. That is the entire extent of what is being claimed.**
+>
+> This procedure rewrites an ACPI table your firmware publishes and injects it at boot. That is deep in the path your machine uses to come up. A mistake — a wrong bus number, a bad table, a fallback kernel that was not really clean — can leave a system that **does not boot**, and recovering may require physical access to the machine.
+>
+> **No warranty of any kind is given, and no responsibility is accepted for any outcome.** That includes systems that fail to boot, data loss, hardware misbehaviour, or anything else — whether your setup differs from the above **or matches it exactly**. Identical versions and identical hardware are still no guarantee: firmware revisions, BIOS settings, installed modules and boot configuration all vary in ways this document cannot account for.
+>
+> If you use any of this, you are the one deciding to. Before you start:
+>
+> - **Understand each step before running it.** Do not paste commands you cannot explain.
+> - **Have working backups**, and confirm you can actually restore them.
+> - **Make sure you have a rollback path** — a second, genuinely clean kernel in your boot menu — and know how to reach it.
+> - **Have a way in if it does not boot**: physical console, IPMI/iDRAC/iLO, or a rescue USB.
+> - **Do not try this first on something you cannot afford to lose.**
+>
+> If any of that sounds like more than you want to take on, that is a completely reasonable conclusion. Running the workload on the host without passthrough is often the saner trade.
+
+---
+
 # Fixing "Firmware has requested this device have a 1:1 IOMMU mapping"
 
 Tools to diagnose and fix this PCIe passthrough failure on AMD boards, **without recompiling the kernel**:

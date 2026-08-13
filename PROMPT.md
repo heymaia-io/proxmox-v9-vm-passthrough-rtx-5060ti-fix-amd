@@ -8,6 +8,22 @@ Everything below is written for the agent.
 
 ---
 
+## ⚠️ Surface this to the user before you touch anything
+
+This repo records what worked on **one specific machine** (Proxmox VE 9.1.6, kernel 6.17.13-21-pve on ZFS root, MSI PRO B850M-A WIFI with BIOS 2.A30, NVIDIA RTX 5060 Ti). It carries **no warranty and no guarantee**, even on identical hardware and versions.
+
+The procedure rewrites an ACPI table and injects it at boot. Done wrong, it can leave a machine that **does not boot**, and recovery may need physical access.
+
+Before you begin Phase 4 — the first change to the system — make sure the user has explicitly confirmed they understand and accept that. Specifically, confirm they have:
+
+- Working backups they have actually tested
+- A second, genuinely clean kernel in the boot menu (Phase 2b)
+- A way in if the machine will not boot: physical console, IPMI/iDRAC/iLO, or rescue media
+
+If the user cannot confirm those, **say so and stop**. Offer the alternative: running the workload directly on the host without passthrough avoids this entire class of problem. Do not push forward because the fix is technically available.
+
+---
+
 ## Your mission
 
 The user cannot pass a PCIe device through to a virtual machine. The host logs:
