@@ -135,7 +135,20 @@ Stop here and ask the user to disable Secure Boot in the BIOS. Tell them:
 - A patched unsigned kernel — the alternative fix circulating in forums — carries the same requirement, so this is not a downside unique to this approach.
 - On most boards: `Settings → Advanced → Windows OS Configuration → Secure Boot → Disabled`.
 
-They must reboot before you can continue. When they return, re-check lockdown before doing anything else.
+They must reboot before you can continue. When they return, **re-check lockdown before doing anything else** — do not assume the BIOS change took effect.
+
+If a fallback kernel was installed in step 2b, mention that this BIOS trip is a good moment to boot into it once and confirm it works.
+
+#### Other BIOS settings, for the record
+
+On the reference machine, two options were already disabled while the fix was working:
+
+- **Re-Size BAR Support** — disabled
+- **Above 4G Memory / Crypto Currency Mining** — off (it depends on Resizable BAR, so disabling ReBAR takes it along)
+
+Turning them off **did not fix the error on its own**; both were tried and changed nothing. But the machine was in that state when the fix succeeded, so any interaction was never isolated. Treat this as an unknown, not as a requirement.
+
+Do not suggest changing them as part of the normal procedure. Only raise it if everything else verifies and the problem persists — and then change one setting at a time, so the result stays attributable.
 
 ### 2b. Make sure a fallback kernel exists — before Phase 4
 

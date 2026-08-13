@@ -12,6 +12,7 @@
 > | BIOS | 2.A30, dated 2026-01-21 |
 > | Device passed through | NVIDIA RTX 5060 Ti, GB206 — `10de:2d04` |
 > | Exact error | `vfio-pci: Firmware has requested this device have a 1:1 IOMMU mapping` |
+> | BIOS state | Secure Boot **off**; Re-Size BAR Support **off**; Above 4G / Crypto Currency Mining **off** |
 >
 > **It worked there. That is the entire extent of what is being claimed.**
 >
@@ -104,7 +105,7 @@ Compared to compiling a patched kernel, this takes seconds instead of hours and 
 | **A second kernel installed** | `ls /boot/vmlinuz-*` — see below |
 | Python 3 | already present on Proxmox |
 
-**Secure Boot is a hard blocker, not a recommendation.** Under `integrity` lockdown, `acpi_table_upgrade()` is skipped entirely and the override does nothing. You have to disable it in the BIOS. An unsigned patched kernel would carry the same requirement.
+**Secure Boot is a hard blocker, not a recommendation.** Under `integrity` lockdown, `acpi_table_upgrade()` is skipped entirely and the override does nothing. Disabling it is [step 3](#3-disable-secure-boot-in-the-bios). An unsigned patched kernel would carry the same requirement, so this is not a downside unique to this approach.
 
 **The second kernel is your rollback path.** The recovery plan is "boot the other kernel from the GRUB menu", so you need one whose initrd carries no override. Many hosts already have two by accident of a past upgrade; a fresh install often has only one. [Step 2](#2-make-sure-you-have-a-fallback-kernel) covers how to add one and which version to pick — do it **before** installing the override, for a reason that is easy to miss.
 
@@ -178,7 +179,41 @@ ls /boot/vmlinuz-* /boot/initrd.img-*
 
 Ideally reboot once into the new kernel to prove it actually boots, then reboot back. A fallback that has never been booted is an assumption, not a guarantee.
 
-### 3. Patch the table
+### 3. Disable Secure Boot in the BIOS
+
+```bash
+cat /sys/kernel/security/lockdown
+```
+
+If it reads `none [integrity] confidentiality`, Secure Boot is on and the kernel is locked down. **`acpi_table_upgrade()` is skipped entirely under lockdown** — the override will install and do absolutely nothing, with no error to tell you why.
+
+This is a hard prerequisite, not a preference. The patched-kernel approach circulating in forums needs an unsigned kernel, so it carries exactly the same requirement.
+
+On most boards: `Settings → Advanced → Windows OS Configuration → Secure Boot → Disabled`. Some vendors put it under `Settings → Security`.
+
+If you installed a fallback kernel in step 2, this BIOS trip is a good moment to boot into it once and confirm it works, then boot back.
+
+After rebooting, confirm before going any further:
+
+```bash
+cat /sys/kernel/security/lockdown
+#   -> [none] integrity confidentiality
+```
+
+Secure Boot stays off for as long as you use this fix. Re-enabling it means signing the override with your own MOK keys, which is a separate project.
+
+#### While you are in there
+
+On the reference machine, two options were already disabled during the successful fix:
+
+- **Re-Size BAR Support** — disabled
+- **Above 4G Memory / Crypto Currency Mining** — off (it depends on Resizable BAR, so disabling ReBAR takes it with it)
+
+Turning them off **did not fix the error on its own** — both were tried and changed nothing. But the machine was in that state when the fix worked, so their interaction with it was never isolated. If you hit trouble with everything else verified, it is a cheap variable to try.
+
+Do not change them together with anything else. One variable at a time, or you will not know what worked.
+
+### 4. Patch the table
 
 ```bash
 sudo cp /sys/firmware/acpi/tables/IVRS IVRS.original.aml
@@ -187,7 +222,7 @@ sudo cp /sys/firmware/acpi/tables/IVRS IVRS.original.aml
 
 The bus comes from the PCI address: in `0000:01:00.0` it is `01`. The script runs nine checks and **writes nothing if any of them fails**.
 
-### 4. Install
+### 5. Install
 
 ```bash
 sudo ./install.sh IVRS.patched.aml
@@ -197,7 +232,7 @@ Verifies the requirements, packs the table into a cpio archive, installs the hoo
 
 > **It regenerates a single kernel on purpose.** Using `update-initramfs -u -k all` would apply the override to your older kernels too, and those are exactly your rollback path if the system fails to boot.
 
-### 5. Reboot and verify
+### 6. Reboot and verify
 
 ```bash
 dmesg | grep -i 'Table Upgrade'
