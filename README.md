@@ -76,6 +76,16 @@ Compared to compiling a patched kernel, this takes seconds instead of hours and 
 
 ## Usage
 
+### Let an AI agent do it
+
+This repo ships [`PROMPT.md`](PROMPT.md), a complete runbook written for AI coding agents (Claude Code, Cursor, Copilot CLI, Codex, or anything else with shell access). Clone the repo onto the affected machine and say:
+
+> Read `PROMPT.md` in this repo and follow it to fix my PCIe passthrough error.
+
+The runbook makes the agent work read-only until you authorise changes, forces it through a decision gate that confirms this root cause actually applies before touching anything, backs up what it modifies, and — importantly — tells it when to stop and conclude the fix does **not** apply to your case.
+
+Prefer to drive it yourself? Everything below is the same procedure by hand.
+
 ### 1. Diagnose
 
 ```bash
@@ -183,6 +193,7 @@ which walks every cpio archive in the prefix and compares hashes.
 
 | File | Purpose |
 |---|---|
+| `PROMPT.md` | Runbook for AI agents: decision gates, safety rules, verification steps, and when to conclude this fix does not apply |
 | `check.sh` | Read-only diagnostics: lockdown, kernel config, which devices carry `direct` reservations |
 | `dump_ivrs.py` | Decodes the IVRS table and tells you whether a device falls inside an IVMD entry |
 | `patch_ivrs.py` | Generates the patched table, with nine checks before writing anything |
